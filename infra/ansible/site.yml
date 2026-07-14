@@ -1,0 +1,37 @@
+---
+# infra/ansible/site.yml
+#
+# Run order matters:
+#   1. hardening on ALL nodes (control-plane + workers)
+#   2. k3s-server on the control-plane (captures node-token as a fact)
+#   3. k3s-agent on workers (consumes that fact via hostvars)
+#
+# Because (3) depends on a fact set during (2) in the SAME run, this must
+# always be invoked as one `ansible-playbook -i inventory/hosts.ini
+# site.yml` — not as three separate playbook runs — unless you persist
+# the token via a fact cache (see ansible.cfg) or pass it with -e.
+#
+# Usage:
+#   cd infra/ansible
+#   ansible-playbook -i inventory/hosts.ini site.yml
+#
+# Acceptance: `kubectl get nodes -o wide` (using the fetched kubeconfig)
+# shows the control-plane + all workers as Ready.
+
+- name: Harden all cluster nodes
+  hosts: all
+  become: true
+  roles:
+    - hardening
+
+- name: Install k3s server on control-plane
+  hosts: control_plane
+  become: true
+  roles:
+    - k3s-server
+
+- name: Join workers to the cluster
+  hosts: workers
+  become: true
+  roles:
+    - k3s-agent

@@ -1,0 +1,102 @@
+# manifests/app/03-postgres-statefulset.yaml
+#
+# Postgres as a StatefulSet (not a Deployment) + PVC on k3s's default
+# `local-path` storage class. Fixes the single-server assumption "Postgres
+# is a named volume on the Docker host" — see docs/ARCHITECTURE.md.
+#
+# Honest caveat (documented, not hidden): `local-path` is node-local, not
+# real network storage. The PVC survives a Pod *restart* on the same
+# node (proving data persistence — see docs/EVIDENCE/pvc-persist.log),
+# but does NOT survive that specific node disappearing. A fully
+# node-agnostic Postgres needs networked storage (EBS CSI / Longhorn) or
+# a managed DB — see the "Stretch" trade-off discussion in
+# docs/ARCHITECTURE.md. For this capstone's scope, this is a deliberate,
+# documented limitation, not an oversight.
+#
+# Single replica is intentional: HA Postgres (multi-replica with
+# streaming replication, or a managed DB) is an explicit STRETCH goal in
+# the brief, not a Core requirement.
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: taskapp
+  labels:
+    app: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999 # postgres image's built-in `postgres` user
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:18.4
+          ports:
+            - containerPort: 5432
+              name: postgres
+          envFrom:
+            - configMapRef:
+                name: taskapp-config
+            - secretRef:
+                name: taskapp-secret
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: postgres-storage
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false # postgres needs to write to its data dir & /tmp
+            capabilities:
+              drop:
+                - ALL
+          startupProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30 # allow up to 150s for first-boot initdb
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)"]
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi

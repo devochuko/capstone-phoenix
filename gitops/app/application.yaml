@@ -1,0 +1,79 @@
+# gitops/app/application.yaml
+#
+# This is the Argo CD Application that makes "GitOps owns the cluster"
+# real for the TaskApp itself (manifests/app/). Once this is applied,
+# Argo CD reconciles manifests/app/ continuously — no more manual
+# `kubectl apply` for the app (capstone §5 hard constraint).
+#
+# syncPolicy.automated with prune + selfHeal means:
+#   - prune: true   -> objects removed from manifests/app/ get deleted from the cluster
+#   - selfHeal: true -> manual kubectl edits get reverted back to git's state
+#     automatically (this is what "GitOps owns it, not you" actually enforces)
+#
+# Apply this AFTER Argo CD itself is running (see
+# manifests/platform/argocd/install-notes.md):
+#   kubectl apply -f gitops/app/application.yaml
+#
+# Demo (required for the GitOps grading points):
+#   1. argocd app get taskapp           -> Synced + Healthy
+#   2. Edit manifests/app/05-backend-deployment.yaml, bump replicas 2->3, push
+#   3. Watch: argocd app get taskapp --refresh   -> auto-syncs, new Pod appears
+#      No `kubectl apply` involved.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: taskapp
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    # REPLACE with the actual fork URL once forked, per README.md
+    # ("fork it" — Type: individual, Repo: ts-a-devops/capstone-phoenix).
+    repoURL: https://github.com/devochuko/capstone-phoenix.git
+    targetRevision: main
+    path: manifests/app
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: taskapp
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 2m
+
+  # --- Out-of-band Secret protection (READ THIS BEFORE applying) ---
+  #
+  # We deliberately did NOT commit a real Secret to git (see
+  # manifests/app/02-secret.example.yaml) — `taskapp-secret` is created
+  # directly against the cluster instead.
+  #
+  # IMPORTANT: `ignoreDifferences` only governs resources Argo already
+  # tracks because they exist in the git source. A Secret that exists in
+  # the CLUSTER but has NO manifest in git at all is invisible to
+  # ignoreDifferences — Argo instead treats it as an "extraneous"
+  # resource, and with prune: true (set above) it WILL be deleted on
+  # the next sync. That would destroy the Postgres credentials.
+  #
+  # The correct protection is an annotation on the Secret ITSELF, applied
+  # at creation time (see manifests/app/02-secret.example.yaml's header
+  # for the full kubectl command):
+  #
+  #   kubectl annotate secret taskapp-secret -n taskapp \
+  #     argocd.argoproj.io/sync-options=Prune=false
+  #
+  # This tells Argo "never prune this object even though it's not in
+  # git," which is what actually makes "GitOps owns the cluster" safe to
+  # combine with "secrets don't live in git." Verify after creating it:
+  #
+  #   kubectl get secret taskapp-secret -n taskapp -o jsonpath='{.metadata.annotations}'

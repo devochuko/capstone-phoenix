@@ -1,0 +1,49 @@
+---
+# infra/ansible/roles/k3s-agent/tasks/main.yml
+#
+# Joins this host to the cluster as a k3s agent (worker), using the
+# node-token captured by the k3s-server role (passed in via
+# hostvars['<control-plane>']['k3s_node_token'], set as a cacheable fact
+# by that role — see site.yml for play ordering: server role MUST run
+# before this one in the same ansible-playbook invocation, or you must
+# supply k3s_node_token explicitly via -e / fact cache).
+#
+# Idempotent for the same reasons as k3s-server: install script is a
+# no-op once the systemd unit matches; `creates` guards the shell task.
+
+- name: Determine node token (from control-plane's cached fact)
+  ansible.builtin.set_fact:
+    k3s_node_token: "{{ hostvars[groups['control_plane'][0]]['k3s_node_token'] }}"
+  when: k3s_node_token is not defined
+
+- name: Check if k3s binary exists
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: k3s_binary_check
+
+- name: Download k3s installer
+  ansible.builtin.get_url:
+    url: "{{ k3s_install_script | default('https://get.k3s.io') }}"
+    dest: /tmp/install-k3s.sh
+    mode: "0755"
+  when: not k3s_binary_check.stat.exists
+
+- name: Install k3s agent
+  ansible.builtin.command:
+    cmd: /tmp/install-k3s.sh
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+    K3S_URL: "{{ k3s_server_url }}"
+    K3S_TOKEN: "{{ hostvars['control_plane']['k3s_node_token'] }}"
+  args:
+    creates: /usr/local/bin/k3s
+  no_log: true # the token must never hit stdout/logs
+  register: k3s_agent_install_output
+  changed_when: k3s_agent_install_output.rc == 0 and not k3s_binary_check.stat.exists
+
+- name: Wait for k3s-agent service to be active
+  ansible.builtin.systemd:
+    name: k3s-agent
+    state: started
+    enabled: true
+  register: k3s_agent_service

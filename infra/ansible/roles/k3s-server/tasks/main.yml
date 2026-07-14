@@ -1,0 +1,106 @@
+---
+# infra/ansible/roles/k3s-server/tasks/main.yml
+#
+# Installs k3s in server (control-plane) mode. Traefik stays ENABLED
+# (k3s_disable_traefik: false) — see defaults/main.yml for why.
+#
+# Idempotent: the k3s install script itself is idempotent (re-running with
+# the same INSTALL_K3S_VERSION/EXEC is a no-op once the systemd unit
+# matches), and every other task here is a declarative module guarded by
+# `creates`/`changed_when` so re-runs report changed=0.
+
+- name: Check if k3s is already installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: k3s_binary
+
+- name: Download k3s installer
+  ansible.builtin.get_url:
+    url: https://get.k3s.io
+    dest: /tmp/install-k3s.sh
+    mode: "0755"
+  when: not k3s_binary.stat.exists   # Avoid redundant web calls if k3s is live
+
+- name: Install k3s server
+  ansible.builtin.command:
+    cmd: /tmp/install-k3s.sh
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+    INSTALL_K3S_EXEC: >-
+      server
+      --write-kubeconfig-mode=644
+      --cluster-cidr=10.244.0.0/16
+      --service-cidr=10.96.0.0/16
+      {{ '--disable=traefik' if k3s_disable_traefik else '' }}
+  args:
+    creates: /usr/local/bin/k3s
+  register: k3s_install_result
+  changed_when: k3s_install_result.rc == 0 and not k3s_binary.stat.exists
+
+- name: Wait for k3s server to be ready (node-token written)
+  ansible.builtin.wait_for:
+    path: "{{ k3s_token_path }}"
+    timeout: 120
+
+- name: Wait for k3s API to respond
+  ansible.builtin.command:
+    cmd: k3s kubectl get --raw=/readyz
+  register: k3s_readyz
+  retries: 20
+  delay: 5
+  until: k3s_readyz.rc == 0
+  changed_when: false
+
+- name: Read the node-token (for workers to join)
+  ansible.builtin.slurp:
+    src: "{{ k3s_token_path }}"
+  register: k3s_node_token_b64
+
+- name: Expose node token as a fact for other plays in this run
+  ansible.builtin.set_fact:
+    k3s_node_token: "{{ (k3s_node_token_b64.content | b64decode).strip() }}"
+    cacheable: true
+
+- name: Force inject node token into all runtime hosts
+  ansible.builtin.set_fact:
+    k3s_node_token: "{{ k3s_node_token }}"
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  with_items: "{{ groups['all'] }}"
+  run_once: true
+
+- name: Fetch kubeconfig from control-plane to localhost
+  ansible.builtin.fetch:
+    src: "{{ k3s_kubeconfig_path }}"
+    dest: "{{ k3s_fetched_kubeconfig_dest }}"
+    flat: true
+
+- name: Rewrite kubeconfig server address to control-plane PUBLIC IP
+  delegate_to: localhost
+  become: false
+  ansible.builtin.replace:
+    path: "{{ k3s_fetched_kubeconfig_dest }}"
+    regexp: 'https://127\.0\.0\.1:6443'
+    replace: "https://{{ ansible_host }}:6443"
+
+- name: Set local kubeconfig permissions (0600 — it's a credential)
+  delegate_to: localhost
+  become: false
+  ansible.builtin.file:
+    path: "{{ k3s_fetched_kubeconfig_dest }}"
+    mode: "0600"
+
+- name: Ensure k3s service is running
+  ansible.builtin.systemd:
+    name: k3s
+    state: started
+    enabled: true
+
+- name: Wait until control plane is Ready
+  ansible.builtin.command:
+    cmd: k3s kubectl get nodes
+  register: nodes
+  retries: 15
+  delay: 10
+  until: "' Ready ' in nodes.stdout"
+  changed_when: false

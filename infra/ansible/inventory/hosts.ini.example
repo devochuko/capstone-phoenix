@@ -1,0 +1,20 @@
+# infra/ansible/inventory/hosts.ini.example
+#
+# Copy to hosts.ini (gitignored) and fill in with real values from:
+#   cd ../terraform && terraform output ansible_inventory_hint
+#
+# `ansible_host` = node's PUBLIC IP (how Ansible/you reach it via SSH)
+# `private_ip`   = node's PRIVATE IP (how workers join the k3s server —
+#                  6443 is never exposed publicly, by design)
+
+[control_plane]
+control-plane ansible_host=203.0.113.10 private_ip=10.42.1.10
+
+[workers]
+worker-1 ansible_host=203.0.113.11 private_ip=10.42.1.11
+worker-2 ansible_host=203.0.113.12 private_ip=10.42.1.12
+
+[all:vars]
+ansible_user=ubuntu
+ansible_ssh_private_key_file=~/.ssh/phoenix-key.pem
+ansible_python_interpreter=/usr/bin/python3

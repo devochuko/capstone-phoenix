@@ -1,0 +1,191 @@
+# manifests/app/09-networkpolicy.yaml
+#
+# Advanced requirement #2: default-deny in the taskapp namespace, then
+# explicit allow rules so the app still works.
+#
+# CNI / enforcement note (capstone explicitly asks us to document this):
+# k3s ships flannel (data plane / pod routing) AND kube-router's network
+# policy controller (policy enforcement) TOGETHER, by default, since
+# kube-router here runs in "firewall-only" mode purely to enforce
+# standard Kubernetes NetworkPolicy objects via iptables — it is NOT
+# acting as the CNI itself (flannel still does that). This is a common
+# point of confusion: "flannel doesn't enforce NetworkPolicy" is true,
+# but k3s doesn't rely on flannel alone for that — it runs kube-router's
+# controller alongside it specifically to close that gap. No extra CNI
+# install was needed for this requirement; our k3s-server Ansible role
+# does not pass --disable-network-policy, so the controller stays on.
+#
+# Policy graph implemented below:
+#   internet -> [Traefik, kube-system] -> frontend  (port 80)
+#   internet -> [Traefik, kube-system] -> backend    (port 5000, via /api)
+#   frontend -> backend                              (port 5000)
+#   backend  -> postgres                             (port 5432)
+#   ALL pods -> kube-system (DNS, port 53)            (egress, every policy)
+#   default: everything else denied
+
+---
+# 1. Default-deny ALL ingress and egress for every pod in the namespace.
+#    Pods not selected by any more specific policy below get nothing.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: taskapp
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# 2. Postgres: ingress ONLY from backend Pods, on 5432. Egress only for
+#    DNS (Postgres itself doesn't need to call anything else).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-from-backend
+  namespace: taskapp
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: backend
+        # Also allow the migration Job's Pods, which share no common
+        # label with `backend` by default — match on the Job's pod
+        # template instead. (batch/v1 Jobs label pods with
+        # `job-name: taskapp-migrate` automatically.)
+        - podSelector:
+            matchLabels:
+              job-name: taskapp-migrate
+      ports:
+        - protocol: TCP
+          port: 5432
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# 3. Backend: ingress from frontend (proxied /api calls) AND from
+#    Traefik (kube-system) for the Ingress path. Egress to postgres + DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-traffic
+  namespace: taskapp
+spec:
+  podSelector:
+    matchLabels:
+      app: backend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: frontend
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: TCP
+          port: 5000
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# 4. Frontend: ingress from Traefik (kube-system) only. Egress to backend
+#    (for any server-side rendering / proxy needs) + DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-traffic
+  namespace: taskapp
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: TCP
+          port: 80
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: backend
+      ports:
+        - protocol: TCP
+          port: 5000
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# 5. Migration job: egress to Postgres + DNS only.
+# The job pods (labelled job-name=taskapp-migrate) need to REACH postgres
+# on 5432 — the postgres policy above allows the ingress side, but the
+# default-deny policy also blocks the job pods' own egress, so we need
+# this explicit egress allowance too.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-migration-job-egress
+  namespace: taskapp
+spec:
+  podSelector:
+    matchLabels:
+      job-name: taskapp-migrate
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

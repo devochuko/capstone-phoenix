@@ -1,0 +1,19 @@
+---
+# Traefik is KEPT ENABLED (NOT disabled) — community ingress-nginx is
+# retired/archived as of March 2026 and unmaintained, so we use k3s's
+# built-in, actively-maintained Traefik instead. See PROJECT_VALUES.md.
+k3s_disable_traefik: false
+
+# k3s version pin — avoid ":latest"-equivalent drift on infra too.
+# Pinned to a recent stable release line (Kubernetes 1.34) rather than the
+# bleeding-edge 1.36 line, for stability during grading. k3s v1.32+ ships
+# Traefik v3 (actively maintained) when not disabled.
+# Update deliberately; check https://github.com/k3s-io/k3s/releases
+
+# Where the node-token and kubeconfig live on the server after install.
+k3s_token_path: /var/lib/rancher/k3s/server/node-token
+k3s_kubeconfig_path: /etc/rancher/k3s/k3s.yaml
+
+# Local path where we fetch the kubeconfig to, before rewriting the
+# server address from 127.0.0.1 to the control-plane's PUBLIC IP.
+k3s_fetched_kubeconfig_dest: "{{ playbook_dir }}/../../kubeconfig"

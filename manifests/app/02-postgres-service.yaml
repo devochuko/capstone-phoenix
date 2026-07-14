@@ -1,0 +1,23 @@
+# manifests/app/02-postgres-service.yaml
+#
+# Headless Service (clusterIP: None) gives the StatefulSet's Pod a stable
+# DNS name (postgres-0.postgres.taskapp.svc.cluster.local) regardless of
+# which node it's rescheduled to. This is what fixes the single-server
+# assumption "Postgres is just a container on the same Docker network" —
+# see docs/ARCHITECTURE.md.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: taskapp
+  labels:
+    app: postgres
+spec:
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432

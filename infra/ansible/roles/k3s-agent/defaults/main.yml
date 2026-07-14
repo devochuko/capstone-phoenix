@@ -1,0 +1,5 @@
+---
+# The control-plane's PRIVATE IP — workers join over the internal network,
+# never via the public IP (6443 isn't even open to the internet, by
+# design — see the security_group Terraform module).
+k3s_server_url: "https://{{ hostvars[groups['control_plane'][0]]['private_ip'] }}:6443"

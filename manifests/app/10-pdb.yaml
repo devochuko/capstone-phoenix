@@ -1,0 +1,38 @@
+# manifests/app/10-pdb.yaml
+#
+# Advanced requirement #3 (part 1): PodDisruptionBudget so voluntary
+# disruptions (node drains, cluster upgrades) can't take down both
+# replicas of a tier at once. Combined with terminationGracePeriodSeconds
+# + the preStop hook already in the Deployments (graceful shutdown —
+# part 2 of this requirement), this is what makes the live failover demo
+# (`kubectl drain <node>`) not drop traffic.
+#
+# Postgres is deliberately NOT given a PDB: it's a single-replica
+# StatefulSet, so minAvailable: 1 would mean "never allow ANY voluntary
+# disruption of the only replica," which would block legitimate node
+# drains entirely rather than protect availability. Multi-replica
+# Postgres (where a PDB would make sense) is the Stretch goal noted in
+# docs/ARCHITECTURE.md.
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend-pdb
+  namespace: taskapp
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: backend
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend-pdb
+  namespace: taskapp
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: frontend

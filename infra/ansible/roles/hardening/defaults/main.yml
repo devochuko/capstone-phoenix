@@ -1,0 +1,5 @@
+---
+admin_user: "deploy"
+ssh_public_key_path: "~/.ssh/capstone-key.pub"
+cluster_private_cidr: "10.42.0.0/16"
+enable_fail2ban: true

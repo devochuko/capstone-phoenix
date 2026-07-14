@@ -1,0 +1,49 @@
+# gitops/platform/application.yaml
+#
+# Manages the part of the platform layer that's just a Kubernetes object
+# (the cert-manager ClusterIssuer). cert-manager and Argo CD themselves
+# are installed via the upstream manifests BEFORE this is applied (see
+# manifests/platform/cert-manager/install-notes.md and
+# manifests/platform/argocd/install-notes.md) — a controller can't
+# manage its own installation via itself.
+#
+# We deliberately did NOT build a full app-of-apps pattern for this
+# project: with only two child Applications (platform, app) and a real
+# install-order dependency (cert-manager + Argo CD must exist before ANY
+# Application can be applied at all), a root "app-of-apps" Application
+# would add a layer of indirection without removing any of the manual
+# bootstrapping steps in docs/RUNBOOK.md. Two flat, explicitly-ordered
+# Applications are simpler to reason about and demo. See
+# docs/ARCHITECTURE.md "Choices & trade-offs" for the full rationale.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/devochuko/capstone-phoenix.git
+    targetRevision: main
+    path: manifests/platform/cert-manager
+    directory:
+      include: "cluster-issuer.yaml"
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 2m

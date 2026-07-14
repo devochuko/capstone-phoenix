@@ -1,0 +1,46 @@
+# manifests/app/07-ingress.yaml
+#
+# Single domain, same-origin /api routing (see PROJECT_VALUES.md for why:
+# one cert SAN, no CORS configuration needed). cert-manager's
+# `cluster-issuer` annotation triggers automatic Certificate creation —
+# see manifests/platform/cert-manager/cluster-issuer.yaml.
+#
+# Fixes the single-server assumption "ports: published on the host" —
+# many Pods, many nodes now need ONE front door. See
+# docs/ARCHITECTURE.md.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: taskapp
+  namespace: taskapp
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # /api/foo on the wire reaches the backend as /api/foo (NOT stripped)
+    # — the Flask app is expected to mount its routes under /api itself.
+    # If that's not the case, switch to traefik.ingress.kubernetes.io/
+    # router.middlewares with a StripPrefix middleware instead.
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - taskapp.pilgrim.name.ng
+      secretName: taskapp-tls
+  rules:
+    - host: taskapp.pilgrim.name.ng
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port:
+                  number: 5000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

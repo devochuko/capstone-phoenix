@@ -1,0 +1,25 @@
+---
+# infra/ansible/group_vars/all.yml
+#
+# Variables shared across every host in the cluster. Role-specific
+# defaults live in each role's defaults/main.yml and can be overridden
+# here if needed.
+
+# Must match infra/terraform/terraform.tfvars `public_subnet_cidr`'s
+# parent VPC CIDR — used by the hardening role's ufw rule that allows
+# internal cluster traffic (k8s API, kubelet, flannel VXLAN).
+cluster_private_cidr: "10.42.0.0/16"
+pod_cidr: "10.244.0.0/16"
+
+# Must match the SSH key pair used in terraform.tfvars (ssh_key_name).
+ssh_public_key_path: "/home/ochuko/.ssh/capstone-key.pub"
+
+k3s_version: "v1.34.8+k3s1"
+
+k3s_install_script: "https://get.k3s.io"
+
+k3s_token_file: "/var/lib/rancher/k3s/server/node-token"
+
+kubeconfig_path: "/etc/rancher/k3s/k3s.yaml"
+
+node_token_path: "/var/lib/rancher/k3s/server/node-token"

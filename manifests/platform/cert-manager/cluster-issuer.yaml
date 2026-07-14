@@ -1,0 +1,33 @@
+# manifests/platform/cert-manager/cluster-issuer.yaml
+#
+# Let's Encrypt PRODUCTION issuer via HTTP-01 challenge.
+#
+# No `ingress.class` / `ingressClassName` is set on the solver: Traefik
+# (k3s's bundled ingress controller, kept enabled — see
+# PROJECT_VALUES.md) watches ALL Ingress resources by default, so the
+# temporary challenge Ingress that cert-manager creates gets served
+# automatically without any extra wiring.
+#
+# Apply AFTER cert-manager itself is installed (see docs/RUNBOOK.md):
+#   kubectl apply -f manifests/platform/cert-manager/cluster-issuer.yaml
+#
+# Verify:
+#   kubectl get clusterissuer letsencrypt-prod
+#   kubectl describe clusterissuer letsencrypt-prod   # READY: True
+
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # Replace with a real, monitored email — Let's Encrypt sends expiry
+    # warnings here if renewal ever fails.
+    email: devops.ogheneochuko@gmail.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: traefik

@@ -1,0 +1,51 @@
+# manifests/app/08-hpa.yaml
+#
+# Advanced requirement #1: HPA on the backend, CPU-based. min=2 (matches
+# the Core requirement's 2+ replica floor — HPA never scales below the
+# HA minimum), max=6 for headroom under the load test demo (see
+# docs/EVIDENCE/hpa-scale.png).
+#
+# Conservative scale-down (5 min stabilization) prevents flapping right
+# after a load test ends; fast scale-up (0s stabilization) responds to
+# real spikes immediately. Defaults match Kubernetes' own recommended
+# behavior block, made explicit here rather than relying on implicit
+# defaults — see docs/RUNBOOK.md "Scale a tier" for the load-test
+# command used to produce the demo evidence.
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend-hpa
+  namespace: taskapp
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 2
+          periodSeconds: 15
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+      selectPolicy: Min
