@@ -10,3 +10,10 @@ data:
   DATABASE_NAME: "taskapp"
   FLASK_ENV: "production"
   API_BASE_URL: "/api"
+
+metadata:
+  name: taskapp-config
+  namespace: taskapp
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/sync-wave: "1"
