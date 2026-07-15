@@ -19,6 +19,8 @@ kind: PodDisruptionBudget
 metadata:
   name: backend-pdb
   namespace: taskapp
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   minAvailable: 1
   selector:
@@ -31,6 +33,8 @@ kind: PodDisruptionBudget
 metadata:
   name: frontend-pdb
   namespace: taskapp
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
 spec:
   minAvailable: 1
   selector:
