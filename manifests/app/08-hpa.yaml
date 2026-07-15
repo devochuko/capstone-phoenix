@@ -32,7 +32,7 @@ spec:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: 3
+          averageUtilization: 70
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 0
