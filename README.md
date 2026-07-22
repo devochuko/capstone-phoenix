@@ -1,5 +1,7 @@
 # Capstone — Phoenix: TaskApp on Real Kubernetes
 
+<img width="1517" height="850" alt="image" src="https://github.com/user-attachments/assets/b1d3541d-fc67-4b1d-8e33-a0c1643d94a6" />
+
 Take the TaskApp (React/nginx frontend, Flask/Postgres backend) that was previously
 containerized and shipped to a single server with Portainer, and run it on a
 self-provisioned, multi-node Kubernetes (k3s) cluster — highly available,
